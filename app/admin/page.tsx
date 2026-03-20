@@ -10,7 +10,7 @@ export default function AdminPage() {
   const [richieste, setRichieste] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [notifica, setNotifica] = useState('')
-  const [editing, setEditing] = useState<any | null>(null) // Stato per la modifica
+  const [editing, setEditing] = useState<any | null>(null)
   const supabase = createClient()
   const router = useRouter()
 
@@ -22,130 +22,157 @@ export default function AdminPage() {
 
   const fetchRichieste = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('richieste')
-      .select('*, dipendenti!richieste_dipendente_id_fkey(nome, email, cellulare)')
-      .order('created_at', { ascending: false })
+    try {
+      const { data, error } = await supabase
+        .from('richieste')
+        .select('*, dipendenti!richieste_dipendente_id_fkey(nome, email, cellulare)')
+        .order('created_at', { ascending: false })
 
-    if (error) {
-      const { data: retry } = await supabase.from('richieste').select('*, dipendenti!fk_dipendente(nome, email, cellulare)').order('created_at', { ascending: false })
-      setRichieste(retry || [])
-    } else {
-      setRichieste(data || [])
-    }
+      if (error) {
+        const { data: retry } = await supabase.from('richieste').select('*, dipendenti!fk_dipendente(nome, email, cellulare)').order('created_at', { ascending: false })
+        setRichieste(retry || [])
+      } else {
+        setRichieste(data || [])
+      }
+    } catch (err) { console.error(err) }
     setLoading(false)
   }
 
   const exportToExcel = () => {
     const ws = XLSX.utils.json_to_sheet(richieste.map(r => ({
-      Dipendente: r.dipendenti?.nome, Tipo: r.tipo_richiesta, Stato: r.stato,
-      Dal: r.data_inizio, Al: r.data_fine, Ore: `${r.ora_inizio || ''} - ${r.ora_fine || ''}`
+      Dipendente: r.dipendenti?.nome || 'N.D.', Tipo: r.tipo_richiesta, Stato: r.stato,
+      Inizio: r.data_inizio, Fine: r.data_fine, Note: r.note
     })))
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Richieste")
     XLSX.writeFile(wb, "Report_Assenze.xlsx")
   }
 
-  const handleUpdateStatus = async (r: any, nuovoStato: string) => {
-    await supabase.from('richieste').update({ stato: nuovoStato }).eq('id', r.id)
-    setNotifica(`Richiesta ${nuovoStato}!`)
-    // Mail simulata
-    fetch('/api/send-email', { method: 'POST', body: JSON.stringify({ to: r.dipendenti?.email, subject: `Stato: ${nuovoStato}`, html: `Richiesta ${nuovoStato}` })})
-    setTimeout(() => setNotifica(''), 3000)
-    fetchRichieste()
-  }
-
-  const handleSaveEdit = async () => {
-    if (!editing) return
-    const { error } = await supabase.from('richieste').update({
-      data_inizio: editing.data_inizio,
-      data_fine: editing.data_fine,
-      ora_inizio: editing.ora_inizio,
-      ora_fine: editing.ora_fine,
-      note: editing.note
-    }).eq('id', editing.id)
-
-    if (error) alert("Errore nel salvataggio")
-    else {
-      setEditing(null)
-      setNotifica("Modifica salvata!")
+  const handleUpdateStatus = async (r: any, nuovoStato: string, nuovoStatus: string) => {
+    const { error } = await supabase.from('richieste').update({ stato: nuovoStato, status: nuovoStatus }).eq('id', r.id)
+    if (!error) {
+      setNotifica(`Stato aggiornato: ${nuovoStato}`)
+      fetch('/api/send-email', { method: 'POST', body: JSON.stringify({ to: r.dipendenti?.email, subject: `Aggiornamento: ${nuovoStato}`, html: `La tua richiesta è stata ${nuovoStato}` })})
       setTimeout(() => setNotifica(''), 3000)
       fetchRichieste()
     }
   }
 
-  if (loading) return <div className="p-20 text-center font-bold text-black">Caricamento...</div>
+  const handleSaveEdit = async () => {
+    if (!editing) return
+    await supabase.from('richieste').update({
+      data_inizio: editing.data_inizio, data_fine: editing.data_fine,
+      ora_inizio: editing.ora_inizio, ora_fine: editing.ora_fine, note: editing.note
+    }).eq('id', editing.id)
+    setEditing(null); setNotifica("Modifica salvata!"); fetchRichieste()
+    setTimeout(() => setNotifica(''), 3000)
+  }
+
+  if (loading) return <div className="p-20 text-center font-black text-black text-xl">CARICAMENTO...</div>
 
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-10 text-black font-sans">
       <div className="max-w-7xl mx-auto">
         
-        {/* NOTIFICA */}
-        {notifica && <div className="fixed top-5 right-5 bg-blue-600 text-white px-6 py-3 rounded-2xl shadow-2xl z-50 font-bold animate-bounce uppercase text-xs tracking-widest">{notifica}</div>}
+        {notifica && <div className="fixed top-5 right-5 bg-black text-white px-6 py-4 rounded-2xl shadow-2xl z-[200] font-black animate-in fade-in zoom-in text-xs uppercase tracking-widest">{notifica}</div>}
 
-        {/* HEADER */}
-        <div className="flex flex-col lg:flex-row justify-between items-center mb-10 bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 gap-6">
-          <h1 className="text-4xl font-black tracking-tight">Pannello Admin</h1>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={exportToExcel} className="bg-green-600 text-white px-5 py-2.5 rounded-2xl font-bold text-xs">📊 EXCEL</button>
-            <Link href="/admin/calendario" className="bg-purple-600 text-white px-5 py-2.5 rounded-2xl font-bold text-xs">🗓️ CALENDARIO</Link>
-            <Link href="/admin/dipendenti" className="bg-blue-600 text-white px-5 py-2.5 rounded-2xl font-bold text-xs">👥 DIPENDENTI</Link>
+        <div className="flex flex-col lg:flex-row justify-between items-center mb-10 bg-white p-8 rounded-[3rem] shadow-sm border border-gray-100 gap-6">
+          <div>
+            <h1 className="text-4xl font-black text-gray-900 tracking-tight">Pannello Admin</h1>
+            <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mt-1">Gestione Presenze e Assenze</p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button onClick={exportToExcel} className="bg-green-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] shadow-lg shadow-green-100 hover:bg-green-700 transition-all uppercase">📊 Excel</button>
+            <Link href="/admin/calendario" className="bg-purple-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] shadow-lg shadow-purple-100 hover:bg-purple-700 transition-all uppercase">🗓️ Calendario</Link>
+            <Link href="/admin/dipendenti" className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all uppercase">👥 Dipendenti</Link>
           </div>
         </div>
 
-        {/* LISTA */}
-        <div className="grid gap-4">
+        <div className="grid gap-6">
           {richieste.map((r) => (
-            <div key={r.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-lg transition-all">
-              <div className="flex items-center gap-4 md:w-1/4">
-                <div className={`h-12 w-12 rounded-2xl flex items-center justify-center text-2xl ${r.stato === 'APPROVATA' ? 'bg-green-100' : 'bg-yellow-100'}`}>
-                    {r.tipo_richiesta === 'FERIE' ? '🌴' : '🕒'}
+            <div key={r.id} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100 flex flex-col lg:flex-row lg:items-center justify-between gap-6 hover:shadow-xl hover:border-blue-100 transition-all group">
+              
+              {/* INFO DIPENDENTE + SEMAFORO */}
+              <div className="flex items-center gap-5 lg:w-1/3">
+                {/* BOLLINO SEMAFORO */}
+                <div className={`h-4 w-4 rounded-full shrink-0 shadow-lg ${
+                  r.stato === 'APPROVATA' ? 'bg-green-500 shadow-green-200' : 
+                  r.stato === 'RIFIUTATA' ? 'bg-red-500 shadow-red-200' : 
+                  'bg-yellow-400 animate-pulse shadow-yellow-100 border-2 border-white'
+                }`}></div>
+
+                <div className={`h-14 w-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 ${
+                  r.stato === 'APPROVATA' ? 'bg-green-50' : r.stato === 'RIFIUTATA' ? 'bg-red-50' : 'bg-yellow-50'
+                }`}>
+                  {r.tipo_richiesta === 'FERIE' ? '🌴' : r.tipo_richiesta === 'MALATTIA' ? '🤒' : '🕒'}
                 </div>
-                <h3 className="font-extrabold">{r.dipendenti?.nome || 'N.D.'}</h3>
+                
+                <div>
+                  <h3 className="font-black text-xl text-gray-900 leading-none">{r.dipendenti?.nome || 'Utente N.D.'}</h3>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-50 text-blue-600 uppercase tracking-tighter">{r.tipo_richiesta}</span>
+                    <span className={`text-[10px] font-black uppercase ${
+                      r.stato === 'APPROVATA' ? 'text-green-600' : r.stato === 'RIFIUTATA' ? 'text-red-600' : 'text-yellow-600'
+                    }`}>{r.stato}</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="text-center md:flex-1 text-sm">
-                <b>{r.data_inizio}</b> {r.data_fine ? `al ${r.data_fine}` : ''} <br/>
-                <span className="text-gray-400 text-xs uppercase font-black">{r.tipo_richiesta} {r.ora_inizio ? `(${r.ora_inizio}-${r.ora_fine})` : ''}</span>
+              {/* DETTAGLI DATE */}
+              <div className="bg-gray-50/50 p-4 rounded-2xl flex-1 lg:max-w-xs text-center border border-gray-50">
+                <p className="text-[9px] font-black text-gray-400 uppercase mb-1 tracking-widest">Periodo Richiesto</p>
+                <p className="text-sm font-bold text-gray-800">
+                  {r.data_inizio} {r.data_fine && r.data_fine !== r.data_inizio ? ` al ${r.data_fine}` : ''}
+                </p>
+                {r.ora_inizio && <p className="text-xs font-black text-blue-600 mt-1 uppercase tracking-tighter">Ore: {r.ora_inizio} - {r.ora_fine}</p>}
+                {r.allegato_url && <a href={r.allegato_url} target="_blank" className="mt-2 inline-block text-[10px] font-black text-blue-600 underline uppercase tracking-widest">📎 Allegato</a>}
               </div>
 
-              <div className="flex gap-2">
-                <button onClick={() => setEditing(r)} className="p-2.5 bg-gray-100 rounded-xl hover:bg-gray-200">✏️</button>
-                <button onClick={() => handleUpdateStatus(r, 'APPROVATA')} className="bg-green-50 text-green-600 px-4 py-2 rounded-xl font-black text-[10px] uppercase">Approva</button>
-                <button onClick={() => handleUpdateStatus(r, 'RIFIUTATA')} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl font-black text-[10px] uppercase">Rifiuta</button>
-                <button onClick={() => { const msg = `Ciao! La tua richiesta è stata ${r.stato}.`; window.open(`https://wa.me/${r.dipendenti?.cellulare?.replace('+','') || ''}?text=${encodeURIComponent(msg)}`) }} className="bg-green-500 text-white p-2.5 rounded-xl">💬</button>
+              {/* AZIONI */}
+              <div className="flex items-center gap-2 justify-end">
+                <button onClick={() => setEditing(r)} className="p-3 bg-gray-100 rounded-2xl hover:bg-gray-900 hover:text-white transition-all text-lg" title="Modifica">✏️</button>
+                <button 
+                  onClick={() => handleUpdateStatus(r, 'APPROVATA', 'approved')}
+                  className={`px-5 py-3 rounded-2xl font-black text-[10px] transition-all uppercase ${r.stato === 'APPROVATA' ? 'bg-green-600 text-white shadow-lg shadow-green-100' : 'bg-green-50 text-green-600 hover:bg-green-600 hover:text-white'}`}
+                > ✓ Approva </button>
+                <button 
+                  onClick={() => handleUpdateStatus(r, 'RIFIUTATA', 'rejected')}
+                  className={`px-5 py-3 rounded-2xl font-black text-[10px] transition-all uppercase ${r.stato === 'RIFIUTATA' ? 'bg-red-600 text-white shadow-lg shadow-red-100' : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white'}`}
+                > ✕ Rifiuta </button>
+                <button onClick={() => { const msg = `Ciao! Ti comunico che la tua richiesta è stata ${r.stato}.`; window.open(`https://wa.me/${r.dipendenti?.cellulare?.replace('+','') || ''}?text=${encodeURIComponent(msg)}`) }} className="bg-green-500 text-white p-3 rounded-2xl shadow-md hover:scale-110 transition-all font-bold">💬</button>
+                <button onClick={async () => { if(confirm("Eliminare?")) { await supabase.from('richieste').delete().eq('id', r.id); fetchRichieste() } }} className="p-3 text-gray-200 hover:text-red-600 transition-colors">🗑️</button>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* MODAL DI MODIFICA */}
+      {/* MODAL MODIFICA AL VOLO */}
       {editing && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
-          <div className="bg-white w-full max-w-md p-8 rounded-[2.5rem] shadow-2xl animate-in zoom-in duration-200">
-            <h2 className="text-2xl font-black mb-6">Modifica Richiesta</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-black text-gray-400 uppercase">Data Inizio</label>
-                <input type="date" className="w-full p-3 border rounded-xl font-bold" value={editing.data_inizio} onChange={e => setEditing({...editing, data_inizio: e.target.value})} />
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-[300]">
+          <div className="bg-white w-full max-w-md p-10 rounded-[3rem] shadow-2xl animate-in zoom-in duration-300">
+            <h2 className="text-3xl font-black mb-8 tracking-tight">Modifica Dati</h2>
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-50 p-3 rounded-2xl border">
+                    <label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Inizio</label>
+                    <input type="date" className="w-full bg-transparent font-bold outline-none" value={editing.data_inizio} onChange={e => setEditing({...editing, data_inizio: e.target.value})} />
+                </div>
+                <div className="bg-gray-50 p-3 rounded-2xl border">
+                    <label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Fine</label>
+                    <input type="date" className="w-full bg-transparent font-bold outline-none" value={editing.data_fine} onChange={e => setEditing({...editing, data_fine: e.target.value})} />
+                </div>
               </div>
-              {editing.tipo_richiesta !== 'PERMESSO' && (
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase">Data Fine</label>
-                  <input type="date" className="w-full p-3 border rounded-xl font-bold" value={editing.data_fine} onChange={e => setEditing({...editing, data_fine: e.target.value})} />
-                </div>
-              )}
               {editing.tipo_richiesta === 'PERMESSO' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <input type="time" className="p-3 border rounded-xl" value={editing.ora_inizio} onChange={e => setEditing({...editing, ora_inizio: e.target.value})} />
-                  <input type="time" className="p-3 border rounded-xl" value={editing.ora_fine} onChange={e => setEditing({...editing, ora_fine: e.target.value})} />
+                <div className="grid grid-cols-2 gap-4 bg-blue-50 p-4 rounded-2xl">
+                    <input type="time" className="bg-white p-2 rounded-lg font-bold" value={editing.ora_inizio} onChange={e => setEditing({...editing, ora_inizio: e.target.value})} />
+                    <input type="time" className="bg-white p-2 rounded-lg font-bold" value={editing.ora_fine} onChange={e => setEditing({...editing, ora_fine: e.target.value})} />
                 </div>
               )}
-              <textarea className="w-full p-3 border rounded-xl text-sm" rows={3} value={editing.note} onChange={e => setEditing({...editing, note: e.target.value})} placeholder="Note..." />
+              <textarea className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-gray-100 outline-none focus:border-blue-500 transition-all text-sm" rows={3} value={editing.note} onChange={e => setEditing({...editing, note: e.target.value})} placeholder="Note..." />
               
-              <div className="flex gap-2 pt-4">
-                <button onClick={() => setEditing(null)} className="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">Annulla</button>
-                <button onClick={handleSaveEdit} className="flex-1 py-3 bg-blue-600 text-white rounded-2xl font-bold shadow-lg">Salva</button>
+              <div className="flex gap-3 pt-4">
+                <button onClick={() => setEditing(null)} className="flex-1 py-4 bg-gray-100 rounded-2xl font-black text-[10px] uppercase">Annulla</button>
+                <button onClick={handleSaveEdit} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-blue-100">Salva Modifiche</button>
               </div>
             </div>
           </div>
